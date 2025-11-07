@@ -1,0 +1,49 @@
+mlkem-python/
+│
+├── pyproject.toml                ← build system + dependencies (modern standard)
+├── setup.cfg                     ← optional: metadata/config if using setuptools
+├── requirements.txt              ← dev dependencies (pytest, numpy, etc.)
+├── README.md                     ← project overview
+├── LICENSE                       ← license (MIT, BSD, etc.)
+├── .gitignore
+│
+├── src/                          ← all actual code lives here
+│   └── mlkem/                    ← your main package (import as `mlkem`)
+│       ├── __init__.py
+│       ├── params.py
+│       ├── mod.py
+│       ├── poly.py
+│       ├── ntt.py
+│       ├── sample.py
+│       ├── hash.py
+│       ├── utils.py
+│       ├── k_pke.py
+│       ├── kem.py
+│       └── constants/
+│           ├── zetas_kyber.py
+│           └── test_vectors.json
+│
+├── tests/                        ← unit + integration tests
+│   ├── __init__.py
+│   ├── test_mod.py
+│   ├── test_poly.py
+│   ├── test_ntt.py
+│   ├── test_sample.py
+│   ├── test_k_pke.py
+│   ├── test_kem.py
+│   └── test_integration.py
+│
+├── examples/                     ← usage scripts or demos
+│   ├── run_demo.py
+│   ├── verify_vectors.py
+│   └── performance_test.py
+│
+├── docs/                         ← optional project documentation
+│   ├── index.md
+│   ├── design_overview.md
+│   └── fips203_mapping.md
+│
+└── notebooks/                    ← optional Jupyter notebooks for exploration
+    ├── NTT_Visualization.ipynb
+    ├── Keygen_Walkthrough.ipynb
+    └── Encaps_vs_Decaps.ipynb
