@@ -1,5 +1,21 @@
-from auxiliaries import *
-from internal_kpke import KPKE_KeyGen, KPKE_Encrypt, KPKE_Decrypt
+from .auxiliaries import (
+    SampleNTT,
+    PRF_eta,
+    SamplePolyCBD_eta,
+    NTT,
+    NTT_inv,
+    MultiplyNTTs,
+    ByteEncode_d,
+    ByteDecode_d,
+    Compress_d,
+    Decompress_d,
+    G,
+    H,
+    J,
+    H,
+    q,
+)
+from .Internal_kpke import (KPKE_KeyGen, KPKE_Encrypt, KPKE_Decrypt)
 
 # FIPS203 Algorithm 16
 def INTERNAL_MLKEM_KeyGen(d: bytes, z: bytes, params):
