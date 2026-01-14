@@ -193,6 +193,7 @@ def NTT(f: list[int]) -> list[int]:
         length //= 2
     return f_hat
 
+
 # FIPS203 Algorithm 10
 def NTT_inv(f_hat: list[int]) -> list[int]:
     assert len(f_hat) == 256

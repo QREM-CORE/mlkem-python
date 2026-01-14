@@ -17,15 +17,11 @@ from .auxiliaries import (
 def KPKE_KeyGen(d: bytes, k: int, eta1: int) -> (bytes,bytes):
     # Encode k into the minimal number of bytes (at least 1) to avoid
     # 'bytes must be in range(0, 256)' when k > 255.
-    k_bytes_len = max(1, (k.bit_length() + 7) // 8)
-    rho, sigma = G(d + k.to_bytes(k_bytes_len, 'big'))
-
+    rho, sigma = G(d)
     A_hat = [[None for _ in range(k)] for _ in range(k)]
-  
     for i in range(k):
         for j in range(k):
             A_hat[i][j] = SampleNTT(rho + bytes([i]) + bytes([j]))
-            
     Nctr = 0
     
     s = []
@@ -53,18 +49,22 @@ def KPKE_KeyGen(d: bytes, k: int, eta1: int) -> (bytes,bytes):
         Nctr += 1
 
     s_hat = [NTT(poly) for poly in s]
+
     e_hat = [NTT(poly) for poly in e]
+
 
     t_hat = []
     for i in range(k):
         aux = list(e_hat[i])
         for j in range(k):
-            a_times_s = MultiplyNTTs(A_hat[i][j], s_hat[j]) #A*s
+            a_times_s = MultiplyNTTs(A_hat[j][i], s_hat[j]) #A*s
             aux = [(aux[t] + a_times_s[t]) % q for t in range(256)] #+t
         t_hat.append(aux)
-
+    
     ek = b"".join(ByteEncode_d(t_hat[i], 12) for i in range(k)) + rho
     dk = b"".join(ByteEncode_d(s_hat[i], 12) for i in range(k))
+   
+  
     return ek, dk
 
     # FIPS203 Algorithm 14
@@ -81,7 +81,7 @@ def KPKE_Encrypt(ek: bytes, m: bytes, r: bytes, k: int, eta1: int, eta2: int, du
     A_hat = [[None for _ in range(k)] for _ in range(k)]
     for i in range(k):
         for j in range(k):
-            A_hat[i][j] = SampleNTT(rho + bytes([i]) + bytes([j])) # VERIFICAR
+            A_hat[i][j] = SampleNTT(rho + bytes([i]) + bytes([j])) 
 
     Nctr = 0
     y = []
@@ -93,16 +93,16 @@ def KPKE_Encrypt(ek: bytes, m: bytes, r: bytes, k: int, eta1: int, eta2: int, du
     for _ in range(k):
         e1.append(SamplePolyCBD_eta(PRF_eta(eta2, r, bytes([Nctr])), eta2))
         Nctr += 1
-
-    e2 = SamplePolyCBD_eta(PRF_eta(eta2, r, bytes([Nctr])), eta2)
     
+    e2 = SamplePolyCBD_eta(PRF_eta(eta2, r, bytes([Nctr])), eta2)
+ 
     y_hat = [NTT(poly) for poly in y]
 
     u = []
     for i in range(k):
         aux_hat = [0] * 256
         for j in range(k):
-            prod = MultiplyNTTs(A_hat[j][i], y_hat[j])  
+            prod = MultiplyNTTs(A_hat[i][j], y_hat[j])  
             aux_hat = [(aux_hat[t] + prod[t]) % q for t in range(256)]
         u_ntt_inv = NTT_inv(aux_hat)
         u.append([(u_ntt_inv[t] + e1[i][t]) % q for t in range(256)]) 
