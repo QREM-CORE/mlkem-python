@@ -18,13 +18,10 @@ def KPKE_KeyGen(d: bytes, k: int, eta1: int) -> (bytes,bytes):
     # Encode k into the minimal number of bytes (at least 1) to avoid
     # 'bytes must be in range(0, 256)' when k > 255.
     rho, sigma = G(d)
-    # print("rho:", rho)
-    # print("sigma:", sigma)
     A_hat = [[None for _ in range(k)] for _ in range(k)]
     for i in range(k):
         for j in range(k):
             A_hat[i][j] = SampleNTT(rho + bytes([i]) + bytes([j]))
-    # print("A_hat:", A_hat)
     Nctr = 0
     
     s = []
@@ -52,9 +49,9 @@ def KPKE_KeyGen(d: bytes, k: int, eta1: int) -> (bytes,bytes):
         Nctr += 1
 
     s_hat = [NTT(poly) for poly in s]
-    # print("s_hat:", s_hat)
+
     e_hat = [NTT(poly) for poly in e]
-    # print("e_hat:", e_hat)
+
 
     t_hat = []
     for i in range(k):
@@ -84,7 +81,7 @@ def KPKE_Encrypt(ek: bytes, m: bytes, r: bytes, k: int, eta1: int, eta2: int, du
     A_hat = [[None for _ in range(k)] for _ in range(k)]
     for i in range(k):
         for j in range(k):
-            A_hat[i][j] = SampleNTT(rho + bytes([i]) + bytes([j])) # VERIFICAR
+            A_hat[i][j] = SampleNTT(rho + bytes([i]) + bytes([j])) 
 
     Nctr = 0
     y = []
