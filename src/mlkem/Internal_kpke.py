@@ -17,11 +17,11 @@ from .auxiliaries import (
 def KPKE_KeyGen(d: bytes, k: int, eta1: int) -> (bytes,bytes):
     # Encode k into the minimal number of bytes (at least 1) to avoid
     # 'bytes must be in range(0, 256)' when k > 255.
-    rho, sigma = G(d)
+    rho, sigma = G(d + bytes([k])) # added this line
     A_hat = [[None for _ in range(k)] for _ in range(k)]
     for i in range(k):
         for j in range(k):
-            A_hat[i][j] = SampleNTT(rho + bytes([i]) + bytes([j]))
+            A_hat[i][j] = SampleNTT(rho + bytes([j]) + bytes([i]))
     Nctr = 0
     
     s = []
@@ -57,7 +57,7 @@ def KPKE_KeyGen(d: bytes, k: int, eta1: int) -> (bytes,bytes):
     for i in range(k):
         aux = list(e_hat[i])
         for j in range(k):
-            a_times_s = MultiplyNTTs(A_hat[j][i], s_hat[j]) #A*s
+            a_times_s = MultiplyNTTs(A_hat[i][j], s_hat[j]) #A*s 
             aux = [(aux[t] + a_times_s[t]) % q for t in range(256)] #+t
         t_hat.append(aux)
     
