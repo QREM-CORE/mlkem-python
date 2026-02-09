@@ -25,14 +25,7 @@ def compact_json_dumps(obj):
     """
     # Generate the standard indented JSON
     res = json.dumps(obj, indent=2)
-    
-    # This Regex finds patterns like:
-    # [
-    #   1,
-    #   2,
-    #   ...
-    # ]
-    # and collapses them into: [1, 2, ...]
+
     return re.sub(
         r'\[\s+((?:-?\d+,\s+)*-?\d+)\s+\]', 
         lambda m: '[' + re.sub(r'\s+', ' ', m.group(1)) + ']', 
@@ -82,7 +75,7 @@ def verify_and_capture(data):
         output_data["testGroups"].append(new_group)
 
     # 4. Save to JSON using the compact formatter
-    output_filename = 'output_ntt_results.json'
+    output_filename = 'tests/results/output_ntt_results.json'
     with open(output_filename, 'w') as f:
         f.write(compact_json_dumps(output_data))
     
