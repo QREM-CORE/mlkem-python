@@ -6,6 +6,49 @@ from Crypto.Hash import SHA3_256, SHA3_512, SHAKE128, SHAKE256
 q = 3329
 n = 256
 eta = 2 # based on the requirement for Kyber768
+# =============================================================================
+# === Trace Logs
+# === These are module-level lists so any file that imports auxiliaries
+# === can clear and read them (same pattern as ntt_traces in Internal_kpke)
+# =============================================================================
+
+mod_mul_traces   = []   # every (a * b) % q                   → mod_mul.sv
+mod_add_traces   = []   # every (a + b) % q                   → mod_add.sv
+mod_sub_traces   = []   # every (a - b) % q                   → mod_sub.sv
+butterfly_traces = []   # every full butterfly (PE) operation  → pe0.sv / pe3.sv
+ntt_stage_traces = []   # 256 coefficients snapshotted after each NTT stage
+cbd_traces     = []   # every SamplePolyCBD_eta call       
+
+def clear_all_traces():
+    """Helper — call this before each test to ensure isolation."""
+    mod_mul_traces.clear()
+    mod_add_traces.clear()
+    mod_sub_traces.clear()
+    butterfly_traces.clear()
+    ntt_stage_traces.clear()
+    cbd_traces.clear()  
+
+# =============================================================================
+# === Instrumented Arithmetic Primitives
+# =============================================================================
+
+def _log_mul(a, b):
+    """(a * b) % q — maps to mod_mul.sv"""
+    result = (a * b) % q
+    mod_mul_traces.append({"a": a, "b": b, "result": result})
+    return result
+
+def _log_add(a, b):
+    """(a + b) % q — maps to mod_add.sv"""
+    result = (a + b) % q
+    mod_add_traces.append({"a": a, "b": b, "result": result})
+    return result
+
+def _log_sub(a, b):
+    """(a - b) % q — maps to mod_sub.sv"""
+    result = (a - b) % q
+    mod_sub_traces.append({"a": a, "b": b, "result": result})
+    return result
 
 # === === === === ===  === === === === === ===
 # === FIPS203 4.1: Cryptographic Functions ===
@@ -127,15 +170,33 @@ def SampleNTT(B: bytes) -> list[int]:
             j+=1
     return a_hat
 
-# FIPS203 Algorithm 8
+# # FIPS203 Algorithm 8
+# def SamplePolyCBD_eta(B: bytes, eta: int) -> list[int]:
+#     assert eta in (2, 3)  # FIPS 203 uses eta ∈ {2,3}
+#     assert len(B)==64*eta
+#     f=[0]*256; t = BytesToBits(B)
+#     for i in range(256):
+#         x = sum(t[2*eta*i + j] for j in range(eta))
+#         y = sum(t[2*eta*i + eta + j] for j in range(eta))
+#         f[i] = (x - y) % q
+#     return f
 def SamplePolyCBD_eta(B: bytes, eta: int) -> list[int]:
-    assert eta in (2, 3)  # FIPS 203 uses eta ∈ {2,3}
-    assert len(B)==64*eta
-    f=[0]*256; t = BytesToBits(B)
+    assert eta in (2, 3)
+    assert len(B) == 64 * eta
+    f = [0] * 256
+    t = BytesToBits(B)
     for i in range(256):
         x = sum(t[2*eta*i + j] for j in range(eta))
         y = sum(t[2*eta*i + eta + j] for j in range(eta))
         f[i] = (x - y) % q
+
+    # Track call index to distinguish S vs E vectors
+    call_index = len(cbd_traces)
+    cbd_traces.append({
+        "call_index": call_index,
+        "coeffs": list(f)
+    })
+
     return f
 
 # === Precomputed Values for NTT ===
@@ -174,23 +235,82 @@ _2BitRev7_1 = lambda i: [
     2110, -2110, 2935, -2935, 885, -885, 2154, -2154
 ][i % 128]
 
-# FIPS203 Algorithm 9
+# # FIPS203 Algorithm 9
+# def NTT(f: list[int]) -> list[int]:
+#     assert len(f) == 256
+#     f_hat = list(f)
+#     i = 1
+#     length = 128
+#     while length >= 2:
+#         start = 0
+#         while start < 256:
+#             zeta = _BitRev7(i)
+#             i += 1
+#             for j in range(start, start + length):
+#                 t = (zeta * f_hat[j + length]) % q
+#                 f_hat[j + length] = (f_hat[j] - t) % q
+#                 f_hat[j] = (f_hat[j] + t) % q
+#             start += 2 * length
+#         length //= 2
+#     return f_hat
 def NTT(f: list[int]) -> list[int]:
     assert len(f) == 256
     f_hat = list(f)
     i = 1
     length = 128
+    stage = 0
+
+    # Snapshot the raw input before any stage runs
+    ntt_stage_traces.append({
+        "stage":  "input",
+        "length": None,
+        "coeffs": list(f_hat)
+    })
+
     while length >= 2:
         start = 0
         while start < 256:
             zeta = _BitRev7(i)
             i += 1
             for j in range(start, start + length):
-                t = (zeta * f_hat[j + length]) % q
-                f_hat[j + length] = (f_hat[j] - t) % q
-                f_hat[j] = (f_hat[j] + t) % q
+
+                # Snapshot inputs before the butterfly
+                u_in = f_hat[j]
+                v_in = f_hat[j + length]
+
+                # --- Instrumented butterfly ---
+                # t = zeta * v          → mod_mul.sv
+                # u_out = u + t         → mod_add.sv
+                # v_out = u - t         → mod_sub.sv
+                t               = _log_mul(zeta, v_in)
+                f_hat[j]        = _log_add(u_in, t)
+                f_hat[j+length] = _log_sub(u_in, t)
+
+                # Full PE transaction — maps directly to pe0.sv / pe3.sv test vector
+                butterfly_traces.append({
+                    "direction": "fwd",
+                    "stage":     stage,
+                    "layer":     length,   # 128=stage0 ... 2=stage6
+                    "zeta":      zeta,
+                    "u_in":      u_in,
+                    "v_in":      v_in,
+                    "t":         t,        # intermediate mul result
+                    "u_out":     f_hat[j],
+                    "v_out":     f_hat[j + length],
+                })
+
             start += 2 * length
+
+        # Snapshot all 256 coefficients after this entire stage completes
+        ntt_stage_traces.append({
+            "stage":  stage,
+            "length": length,   # 128=stage0, 64=stage1, 32=stage2 ... 2=stage6
+            "coeffs": list(f_hat)
+        })
+
+        stage  += 1
         length //= 2
+
     return f_hat
 
 
