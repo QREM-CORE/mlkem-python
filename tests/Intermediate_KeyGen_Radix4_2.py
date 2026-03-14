@@ -33,56 +33,40 @@ def compact_json_dumps(obj):
 
 def organize_rom_passes(stage_traces):
     """
-    Reorganizes the flat ntt_stage_traces list into ROM hardware pass structure.
+    Reorganizes ntt_stage_traces into ROM hardware pass structure.
 
-    Each forward NTT call produces 8 entries:
-        [0] stage="input"           raw input before any butterfly
-        [1] stage=0, length=128  ┐  ROM 1 Radix-4 pass 1
-        [2] stage=1, length=64   ┘
-        [3] stage=2, length=32   ┐  ROM 1 Radix-4 pass 2
-        [4] stage=3, length=16   ┘
-        [5] stage=4, length=8    ┐  ROM 1 Radix-4 pass 3
-        [6] stage=5, length=4    ┘
-        [7] stage=6, length=2       ROM 2 final Radix-2
+    Each Radix-4/2 NTT call produces 5 entries:
+        [0] stage="input"       raw polynomial before any butterfly
+        [1] stage="r4_pass_1"   after ROM1 Radix-4 pass 1 (stride=64)
+        [2] stage="r4_pass_2"   after ROM1 Radix-4 pass 2 (stride=16)
+        [3] stage="r4_pass_3"   after ROM1 Radix-4 pass 3 (stride=4)
+        [4] stage="r2_final"    after ROM2 final Radix-2  (stride=2)
     """
     rom_output = []
-    num_calls  = len(stage_traces) // 8
+    num_calls  = len(stage_traces) // 5
 
     for ntt_index in range(num_calls):
-        chunk = stage_traces[ntt_index * 8 : (ntt_index + 1) * 8]
+        chunk = stage_traces[ntt_index * 5 : (ntt_index + 1) * 5]
 
-        if len(chunk) != 8:
-            print(f"  Warning: ntt_index={ntt_index} incomplete ({len(chunk)}/8 entries). Skipping.")
+        if len(chunk) != 5:
+            print(f"  Warning: ntt_index={ntt_index} incomplete ({len(chunk)}/5 entries). Skipping.")
             continue
 
         if chunk[0].get("stage") != "input":
             print(f"  Warning: ntt_index={ntt_index} first entry is not 'input'. Skipping.")
             continue
 
-        s = [chunk[i]["coeffs"] for i in range(1, 8)]
-
         rom_output.append({
             "ntt_index": ntt_index,
             "direction": "forward",
             "input":     chunk[0]["coeffs"],
             "ROM1_R4NTT": {
-                "pass_1": {
-                    "after_stage_0_length128": s[0],
-                    "after_stage_1_length64":  s[1]
-                },
-                "pass_2": {
-                    "after_stage_2_length32":  s[2],
-                    "after_stage_3_length16":  s[3]
-                },
-                "pass_3": {
-                    "after_stage_4_length8":   s[4],
-                    "after_stage_5_length4":   s[5]
-                }
+                "pass_1": chunk[1]["coeffs"],
+                "pass_2": chunk[2]["coeffs"],
+                "pass_3": chunk[3]["coeffs"]
             },
             "ROM2_OMEGA": {
-                "final_radix2": {
-                    "after_stage_6_length2": s[6]
-                }
+                "final_radix2": chunk[4]["coeffs"]
             }
         })
 
@@ -157,7 +141,7 @@ def verify_and_capture(data):
 
     os.makedirs("results", exist_ok=True)
 
-    output_filename = "results/output_ntt_radix2_results.json"
+    output_filename = "results/output_ntt_radix_4_2.json"
     with open(output_filename, "w") as f:
         f.write(compact_json_dumps(output_data))
     print(f"\nResults saved to {output_filename}")

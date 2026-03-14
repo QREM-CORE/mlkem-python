@@ -253,66 +253,144 @@ _2BitRev7_1 = lambda i: [
 #             start += 2 * length
 #         length //= 2
 #     return f_hat
+
+# Radix 2 for hardware comparison
+# def NTT(f: list[int]) -> list[int]:
+#     assert len(f) == 256
+#     f_hat = list(f)
+#     i = 1
+#     length = 128
+#     stage = 0
+
+#     # Snapshot the raw input before any stage runs
+#     ntt_stage_traces.append({
+#         "stage":  "input",
+#         "length": None,
+#         "coeffs": list(f_hat)
+#     })
+
+#     while length >= 2:
+#         start = 0
+#         while start < 256:
+#             zeta = _BitRev7(i)
+#             i += 1
+#             for j in range(start, start + length):
+
+#                 # Snapshot inputs before the butterfly
+#                 u_in = f_hat[j]
+#                 v_in = f_hat[j + length]
+
+#                 # --- Instrumented butterfly ---
+#                 # t = zeta * v          → mod_mul.sv
+#                 # u_out = u + t         → mod_add.sv
+#                 # v_out = u - t         → mod_sub.sv
+#                 t               = _log_mul(zeta, v_in)
+#                 f_hat[j]        = _log_add(u_in, t)
+#                 f_hat[j+length] = _log_sub(u_in, t)
+
+#                 # Full PE transaction — maps directly to pe0.sv / pe3.sv test vector
+#                 butterfly_traces.append({
+#                     "direction": "fwd",
+#                     "stage":     stage,
+#                     "layer":     length,   # 128=stage0 ... 2=stage6
+#                     "zeta":      zeta,
+#                     "u_in":      u_in,
+#                     "v_in":      v_in,
+#                     "t":         t,        # intermediate mul result
+#                     "u_out":     f_hat[j],
+#                     "v_out":     f_hat[j + length],
+#                 })
+
+#             start += 2 * length
+
+#         # Snapshot all 256 coefficients after this entire stage completes
+#         ntt_stage_traces.append({
+#             "stage":  stage,
+#             "length": length,   # 128=stage0, 64=stage1, 32=stage2 ... 2=stage6
+#             "coeffs": list(f_hat)
+#         })
+
+#         stage  += 1
+#         length //= 2
+
+#     return f_hat
+
 def NTT(f: list[int]) -> list[int]:
     assert len(f) == 256
-    f_hat = list(f)
-    i = 1
-    length = 128
-    stage = 0
+    a = list(f)
 
-    # Snapshot the raw input before any stage runs
-    ntt_stage_traces.append({
-        "stage":  "input",
-        "length": None,
-        "coeffs": list(f_hat)
-    })
+    OMEGA1_4 = 1729  # ζ^64 mod q — constant 4th primitive root of unity
 
-    while length >= 2:
-        start = 0
-        while start < 256:
-            zeta = _BitRev7(i)
-            i += 1
-            for j in range(start, start + length):
+    # Build R4NTT_ROM: 21 triplets (ω1, ω2, ω3), where ω3 = ω1*ω2 mod q
+    # p=3 →  1 entry: ω2=_BitRev7(1),    ω1=_BitRev7(2)
+    # p=2 →  4 entries: ω2=_BitRev7(4+k),  ω1=_BitRev7(8+2k)
+    # p=1 → 16 entries: ω2=_BitRev7(16+k), ω1=_BitRev7(32+2k)
+    R4NTT_ROM = []
+    w2 = _BitRev7(1);  w1 = _BitRev7(2)
+    R4NTT_ROM.append((w1, w2, (w1 * w2) % q))
+    for k in range(4):
+        w2 = _BitRev7(4 + k);  w1 = _BitRev7(8 + 2*k)
+        R4NTT_ROM.append((w1, w2, (w1 * w2) % q))
+    for k in range(16):
+        w2 = _BitRev7(16 + k);  w1 = _BitRev7(32 + 2*k)
+        R4NTT_ROM.append((w1, w2, (w1 * w2) % q))
 
-                # Snapshot inputs before the butterfly
-                u_in = f_hat[j]
-                v_in = f_hat[j + length]
+    # OMEGA_ROM: 64 entries for the final Radix-2 pass
+    OMEGA_ROM = [_BitRev7(64 + b) for b in range(64)]
 
-                # --- Instrumented butterfly ---
-                # t = zeta * v          → mod_mul.sv
-                # u_out = u + t         → mod_add.sv
-                # v_out = u - t         → mod_sub.sv
-                t               = _log_mul(zeta, v_in)
-                f_hat[j]        = _log_add(u_in, t)
-                f_hat[j+length] = _log_sub(u_in, t)
+    # Snapshot raw input
+    ntt_stage_traces.append({"stage": "input", "length": None, "coeffs": list(a)})
 
-                # Full PE transaction — maps directly to pe0.sv / pe3.sv test vector
-                butterfly_traces.append({
-                    "direction": "fwd",
-                    "stage":     stage,
-                    "layer":     length,   # 128=stage0 ... 2=stage6
-                    "zeta":      zeta,
-                    "u_in":      u_in,
-                    "v_in":      v_in,
-                    "t":         t,        # intermediate mul result
-                    "u_out":     f_hat[j],
-                    "v_out":     f_hat[j + length],
-                })
+    rom_idx = 0
 
-            start += 2 * length
+    # Three Radix-4 passes: p = 3, 2, 1
+    for p in range(3, 0, -1):
+        stride   = 4 ** p   # 64 → 16 → 4
+        pass_num = 4 - p    #  1 →  2 → 3
 
-        # Snapshot all 256 coefficients after this entire stage completes
+        for k in range(256 // (4 * stride)):
+            omega1, omega2, omega3 = R4NTT_ROM[rom_idx];  rom_idx += 1
+
+            for j in range(stride):
+                m = 4 * k * stride + j
+
+                r0 = (a[m]            + a[m + 2*stride] * omega2) % q
+                r1 = (a[m]            - a[m + 2*stride] * omega2) % q
+                r2 = (a[m + stride]   * omega1 + a[m + 3*stride] * omega3) % q
+                r3 = (a[m + stride]   * omega1 - a[m + 3*stride] * omega3) % q
+
+                a[m]            = (r0 + r2)            % q
+                a[m + stride]   = (r0 - r2)            % q
+                a[m + 2*stride] = (r1 + r3 * OMEGA1_4) % q
+                a[m + 3*stride] = (r1 - r3 * OMEGA1_4) % q
+
+        # Snapshot after each Radix-4 pass — matches ROM1 hardware checkpoint
         ntt_stage_traces.append({
-            "stage":  stage,
-            "length": length,   # 128=stage0, 64=stage1, 32=stage2 ... 2=stage6
-            "coeffs": list(f_hat)
+            "stage":  f"r4_pass_{pass_num}",
+            "pass":   pass_num,
+            "length": stride,
+            "coeffs": list(a)
         })
 
-        stage  += 1
-        length //= 2
+    # Final Radix-2 pass — matches ROM2 hardware checkpoint
+    for j in range(0, 256, 4):
+        omega = OMEGA_ROM[j // 4]
+        u0 = a[j];    u1 = a[j + 1]
+        v0 = a[j + 2] * omega % q
+        v1 = a[j + 3] * omega % q
+        a[j]     = (u0 + v0) % q
+        a[j + 2] = (u0 - v0) % q
+        a[j + 1] = (u1 + v1) % q
+        a[j + 3] = (u1 - v1) % q
 
-    return f_hat
+    ntt_stage_traces.append({
+        "stage":  "r2_final",
+        "pass":   4,
+        "length": 2,
+        "coeffs": list(a)
+    })
 
+    return a
 
 # FIPS203 Algorithm 10
 def NTT_inv(f_hat: list[int]) -> list[int]:
