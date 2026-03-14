@@ -10,15 +10,20 @@ from mlkem import Internal_kpke
 from mlkem import auxiliaries
 
 class MLKEM768:
-    k = 3
+    k    = 3
     eta1 = 2
     eta2 = 2
-    q = 3329
-    n = 256
-    du = 10
-    dv = 4
+    q    = 3329
+    n    = 256
+    du   = 10
+    dv   = 4
+
+# =============================================================================
+# === Helpers
+# =============================================================================
 
 def compact_json_dumps(obj):
+    """Integer arrays on one line, everything else indented."""
     res = json.dumps(obj, indent=2)
     return re.sub(
         r'\[\s+((?:-?\d+,\s+)*-?\d+)\s+\]',
@@ -28,114 +33,67 @@ def compact_json_dumps(obj):
 
 def organize_rom_passes(stage_traces):
     """
-    Takes a flat list of 7-stage NTT snapshots (one entry per NTT call)
-    and reorganizes them into ROM 1/2/3/4 hardware pass structure.
+    Reorganizes the flat ntt_stage_traces list into ROM hardware pass structure.
 
-    Expected format of each entry in stage_traces:
-        {
-            "direction": "forward" | "inverse",
-            "ntt_index": int,          # which NTT call this was
-            "stages": [s0, s1, ..., s6]  # 7 polynomial snapshots
-        }
-
-    Forward NTT stages map to:
-        ROM 1 Radix-4 Pass 1 : stages[0] (length=128), stages[1] (length=64)
-        ROM 1 Radix-4 Pass 2 : stages[2] (length=32),  stages[3] (length=16)
-        ROM 1 Radix-4 Pass 3 : stages[4] (length=8),   stages[5] (length=4)
-        ROM 2 Radix-2        : stages[6] (length=2)
-
-    Inverse NTT stages map to:
-        ROM 4 Radix-2        : stages[0] (length=2)
-        ROM 3 Radix-4 Pass 1 : stages[1] (length=4),   stages[2] (length=8)
-        ROM 3 Radix-4 Pass 2 : stages[3] (length=16),  stages[4] (length=32)
-        ROM 3 Radix-4 Pass 3 : stages[5] (length=64),  stages[6] (length=128)
+    Each forward NTT call produces 8 entries:
+        [0] stage="input"           raw input before any butterfly
+        [1] stage=0, length=128  ┐  ROM 1 Radix-4 pass 1
+        [2] stage=1, length=64   ┘
+        [3] stage=2, length=32   ┐  ROM 1 Radix-4 pass 2
+        [4] stage=3, length=16   ┘
+        [5] stage=4, length=8    ┐  ROM 1 Radix-4 pass 3
+        [6] stage=5, length=4    ┘
+        [7] stage=6, length=2       ROM 2 final Radix-2
     """
     rom_output = []
+    num_calls  = len(stage_traces) // 8
 
-    for entry in stage_traces:
-        direction = entry.get("direction")
-        ntt_index = entry.get("ntt_index")
-        stages    = entry.get("stages", [])
+    for ntt_index in range(num_calls):
+        chunk = stage_traces[ntt_index * 8 : (ntt_index + 1) * 8]
 
-        if len(stages) != 7:
-            print(f"  Warning: ntt_index={ntt_index} has {len(stages)} stages, expected 7. Skipping.")
+        if len(chunk) != 8:
+            print(f"  Warning: ntt_index={ntt_index} incomplete ({len(chunk)}/8 entries). Skipping.")
             continue
 
-        if direction == "forward":
-            rom_entry = {
-                "ntt_index": ntt_index,
-                "direction": "forward",
-                "ROM1_R4NTT": {
-                    "pass_1": {
-                        "after_stage_1_length128": stages[0],
-                        "after_stage_2_length64":  stages[1]
-                    },
-                    "pass_2": {
-                        "after_stage_3_length32":  stages[2],
-                        "after_stage_4_length16":  stages[3]
-                    },
-                    "pass_3": {
-                        "after_stage_5_length8":   stages[4],
-                        "after_stage_6_length4":   stages[5]
-                    }
-                },
-                "ROM2_OMEGA": {
-                    "final_radix2": {
-                        "after_stage_7_length2":   stages[6]
-                    }
-                }
-            }
-
-        elif direction == "inverse":
-            rom_entry = {
-                "ntt_index": ntt_index,
-                "direction": "inverse",
-                "ROM4_OMEGA_INV": {
-                    "initial_radix2": {
-                        "after_stage_1_length2":   stages[0]
-                    }
-                },
-                "ROM3_R4INTT": {
-                    "pass_1": {
-                        "after_stage_2_length4":   stages[1],
-                        "after_stage_3_length8":   stages[2]
-                    },
-                    "pass_2": {
-                        "after_stage_4_length16":  stages[3],
-                        "after_stage_5_length32":  stages[4]
-                    },
-                    "pass_3": {
-                        "after_stage_6_length64":  stages[5],
-                        "after_stage_7_length128": stages[6]
-                    }
-                }
-            }
-
-        else:
-            print(f"  Warning: unknown direction '{direction}' for ntt_index={ntt_index}. Skipping.")
+        if chunk[0].get("stage") != "input":
+            print(f"  Warning: ntt_index={ntt_index} first entry is not 'input'. Skipping.")
             continue
 
-        rom_output.append(rom_entry)
+        s = [chunk[i]["coeffs"] for i in range(1, 8)]
+
+        rom_output.append({
+            "ntt_index": ntt_index,
+            "direction": "forward",
+            "input":     chunk[0]["coeffs"],
+            "ROM1_R4NTT": {
+                "pass_1": {
+                    "after_stage_0_length128": s[0],
+                    "after_stage_1_length64":  s[1]
+                },
+                "pass_2": {
+                    "after_stage_2_length32":  s[2],
+                    "after_stage_3_length16":  s[3]
+                },
+                "pass_3": {
+                    "after_stage_4_length8":   s[4],
+                    "after_stage_5_length4":   s[5]
+                }
+            },
+            "ROM2_OMEGA": {
+                "final_radix2": {
+                    "after_stage_6_length2": s[6]
+                }
+            }
+        })
 
     return rom_output
 
+# =============================================================================
+# === Main
+# =============================================================================
 
 def verify_and_capture(data):
     output_data = {
-        "vsId":       data.get("vsId"),
-        "algorithm":  data.get("algorithm"),
-        "revision":   data.get("revision"),
-        "testGroups": []
-    }
-
-    stage_output = {
-        "vsId":       data.get("vsId"),
-        "algorithm":  data.get("algorithm"),
-        "revision":   data.get("revision"),
-        "testGroups": []
-    }
-
-    rom_output = {
         "vsId":       data.get("vsId"),
         "algorithm":  data.get("algorithm"),
         "revision":   data.get("revision"),
@@ -151,75 +109,63 @@ def verify_and_capture(data):
             "parameterSet": group.get("parameterSet"),
             "tests":        []
         }
-        stage_group = {
-            "tgId":         group.get("tgId"),
-            "parameterSet": group.get("parameterSet"),
-            "tests":        []
-        }
-        rom_group = {
-            "tgId":         group.get("tgId"),
-            "parameterSet": group.get("parameterSet"),
-            "tests":        []
-        }
 
         for test in group.get("tests", []):
+
+            # Clear all traces before each test
             Internal_kpke.ntt_traces = []
             auxiliaries.ntt_stage_traces.clear()
+            auxiliaries.cbd_traces.clear()
 
             d_bytes = bytes.fromhex(test.get("d"))
             z_bytes = bytes.fromhex(test.get("z"))
 
+            # Run KeyGen — populates all trace lists as a side effect
             ek_bytes, dk_bytes = INTERNAL_MLKEM_KeyGen(d_bytes, z_bytes, MLKEM768)
 
-            # Main results
+            # Extract S and E vectors from CBD traces
+            # For ML-KEM-768 (k=3):
+            #   cbd_traces[0..2] = S vector (secret)
+            #   cbd_traces[3..5] = E vector (error)
+            k   = MLKEM768.k
+            cbd = list(auxiliaries.cbd_traces)
+            s_and_e = {
+                "S": [cbd[i]["coeffs"] for i in range(k)      if i < len(cbd)],
+                "E": [cbd[i]["coeffs"] for i in range(k, 2*k) if i < len(cbd)]
+            }
+
+            rom_passes = organize_rom_passes(list(auxiliaries.ntt_stage_traces))
+
             test_entry = {
-                "tcId": test.get("tcId"),
-                "d":    test.get("d"),
-                "z":    test.get("z"),
-                "ek":   ek_bytes.hex().upper(),
-                "dk":   dk_bytes.hex().upper(),
-                "ntt_intermediates": list(Internal_kpke.ntt_traces)
+                "tcId":              test.get("tcId"),
+                "d":                 test.get("d"),
+                "z":                 test.get("z"),
+                "ek":                ek_bytes.hex().upper(),
+                "dk":                dk_bytes.hex().upper(),
+                "S_and_E_vectors":   s_and_e,
+                "ntt_intermediates": list(Internal_kpke.ntt_traces),
+                "rom_passes":        rom_passes
             }
             new_group["tests"].append(test_entry)
 
-            # Raw stage snapshots
-            stage_entry = {
-                "tcId":             test.get("tcId"),
-                "ntt_stage_traces": list(auxiliaries.ntt_stage_traces)
-            }
-            stage_group["tests"].append(stage_entry)
-
-            # ROM-organized passes  <-- new
-            rom_entry = {
-                "tcId":      test.get("tcId"),
-                "rom_passes": organize_rom_passes(list(auxiliaries.ntt_stage_traces))
-            }
-            rom_group["tests"].append(rom_entry)
-
-            print(f"  tcId={test.get('tcId')} | stages={len(auxiliaries.ntt_stage_traces)} "
-                  f"| rom_entries={len(rom_entry['rom_passes'])}")
+            print(f"  tcId={test.get('tcId')} "
+                  f"| rom_entries={len(rom_passes)} "
+                  f"| S_polys={len(s_and_e['S'])} "
+                  f"| E_polys={len(s_and_e['E'])}")
 
         output_data["testGroups"].append(new_group)
-        stage_output["testGroups"].append(stage_group)
-        rom_output["testGroups"].append(rom_group)
 
-    os.makedirs("tests/results", exist_ok=True)
+    os.makedirs("results", exist_ok=True)
 
-    output_filename = "tests/results/output_ntt_results.json"
+    output_filename = "results/output_ntt_results.json"
     with open(output_filename, "w") as f:
         f.write(compact_json_dumps(output_data))
-    print(f"\nMain results saved to      {output_filename}")
+    print(f"\nResults saved to {output_filename}")
 
-    stage_filename = "tests/results/output_ntt_stages.json"
-    with open(stage_filename, "w") as f:
-        f.write(compact_json_dumps(stage_output))
-    print(f"Stage snapshots saved to   {stage_filename}")
 
-    rom_filename = "tests/results/output_ntt_roms.json"
-    with open(rom_filename, "w") as f:
-        f.write(compact_json_dumps(rom_output))
-    print(f"ROM pass output saved to   {rom_filename}")
-
+# =============================================================================
+# === Entry Point
+# =============================================================================
 
 input_path = "ML-KEM-KeyGen-FIPS203/prompt (1).json"
 if os.path.exists(input_path):
