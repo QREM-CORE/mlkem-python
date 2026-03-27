@@ -17,7 +17,8 @@ mod_add_traces   = []   # every (a + b) % q                   → mod_add.sv
 mod_sub_traces   = []   # every (a - b) % q                   → mod_sub.sv
 butterfly_traces = []   # every full butterfly (PE) operation  → pe0.sv / pe3.sv
 ntt_stage_traces = []   # 256 coefficients snapshotted after each NTT stage
-cbd_traces     = []   # every SamplePolyCBD_eta call       
+cbd_traces     = []   # every SamplePolyCBD_eta call    
+intt_stage_traces = []   # 256 coefficients snapshotted after each INTT stage   
 
 def clear_all_traces():
     """Helper — call this before each test to ensure isolation."""
@@ -27,6 +28,7 @@ def clear_all_traces():
     butterfly_traces.clear()
     ntt_stage_traces.clear()
     cbd_traces.clear()  
+    intt_stage_traces.clear()
 
 # =============================================================================
 # === Instrumented Arithmetic Primitives
@@ -392,26 +394,106 @@ def NTT(f: list[int]) -> list[int]:
 
     return a
 
-# FIPS203 Algorithm 10
+# # FIPS203 Algorithm 10
+# def NTT_inv(f_hat: list[int]) -> list[int]:
+#     assert len(f_hat) == 256
+#     f = list(f_hat)
+#     i = 127
+#     length = 2
+#     while length <= 128:
+#         start = 0
+#         while start < 256:
+#             zeta = _BitRev7(i)
+#             i -= 1
+#             for j in range(start, start + length):
+#                 t = f[j]
+#                 f[j] = (t + f[j + length]) % q
+#                 f[j + length] = (zeta * (f[j + length] - t)) % q
+#             start += 2 * length
+#         length *= 2
+#     for j in range(256):
+#         f[j] = (f[j] * 3303) % q
+#     return f
+
 def NTT_inv(f_hat: list[int]) -> list[int]:
     assert len(f_hat) == 256
-    f = list(f_hat)
-    i = 127
-    length = 2
-    while length <= 128:
-        start = 0
-        while start < 256:
-            zeta = _BitRev7(i)
-            i -= 1
-            for j in range(start, start + length):
-                t = f[j]
-                f[j] = (t + f[j + length]) % q
-                f[j + length] = (zeta * (f[j + length] - t)) % q
-            start += 2 * length
-        length *= 2
-    for j in range(256):
-        f[j] = (f[j] * 3303) % q
-    return f
+    a = list(f_hat)
+
+    INV2     = 1665   # 2^-1 mod 3329
+    INV4     = 2497   # 4^-1 mod 3329
+    OMEGA1_4 = 1729   # ζ^64 mod q — constant primitive 4th root of unity
+
+    # OMEGA_INV_ROM: 64 entries for the first Radix-2 pass (Algorithm 6, lines 1–7)
+    # ω⁻¹[k] = −ZETAS[127−k] × INV2  mod q
+    OMEGA_INV_ROM = [(-_BitRev7(127 - b) * INV2) % q for b in range(64)]
+
+    # R4INTT_ROM: 21 triplets (ω1⁻¹, ω2⁻¹, ω3⁻¹) for three Radix-4 passes
+    # Groups are consumed in descending twiddle-index order (mirrors standard
+    # radix-2 INTT which walks ZETAS[127..1] backwards).
+    # Derivation: za = upper-level zeta, zb = lower-level zeta
+    #   ω1⁻¹ = −za/4,  ω2⁻¹ = −zb/2,  ω3⁻¹ = +za·zb/4   (all mod q)
+    #
+    # p=1 → 16 entries: za = _BitRev7(62−2k),  zb = _BitRev7(31−k),  k=0..15
+    # p=2 →  4 entries: za = _BitRev7(14−2k),  zb = _BitRev7( 7−k),  k=0..3
+    # p=3 →  1 entry:   za = _BitRev7(2),       zb = _BitRev7(1)
+    R4INTT_ROM = []
+    for k in range(16):
+        za = _BitRev7(62 - 2*k);  zb = _BitRev7(31 - k)
+        R4INTT_ROM.append(((-za * INV4) % q, (-zb * INV2) % q, (za * zb * INV4) % q))
+    for k in range(4):
+        za = _BitRev7(14 - 2*k);  zb = _BitRev7(7 - k)
+        R4INTT_ROM.append(((-za * INV4) % q, (-zb * INV2) % q, (za * zb * INV4) % q))
+    za = _BitRev7(2);  zb = _BitRev7(1)
+    R4INTT_ROM.append(((-za * INV4) % q, (-zb * INV2) % q, (za * zb * INV4) % q))
+
+    # Snapshot raw input
+    intt_stage_traces.append({"stage": "input", "length": None, "coeffs": list(a)})
+
+    # First Radix-2 pass — Algorithm 6, lines 1–7
+    # Processes interleaved pairs (a[j], a[j+2]) and (a[j+1], a[j+3])
+    for j in range(0, 256, 4):
+        w  = OMEGA_INV_ROM[j >> 2]
+        t0 = a[j];  t1 = a[j + 1]
+        a[j]     = (a[j + 2] + t0) * INV2 % q
+        a[j + 2] = (t0 - a[j + 2]) * w    % q
+        a[j + 1] = (a[j + 3] + t1) * INV2 % q
+        a[j + 3] = (t1 - a[j + 3]) * w    % q
+
+    intt_stage_traces.append({"stage": "r2_first", "pass": 1, "length": 2, "coeffs": list(a)})
+
+    rom_idx = 0
+
+    # Three Radix-4 passes: p = 1, 2, 3  — Algorithm 6, lines 9–21
+    for p in range(1, 4):
+        stride   = 4 ** p   # 4 → 16 → 64
+        pass_num = p + 1    # 2 →  3 →  4
+
+        for k in range(256 // (4 * stride)):
+            w1, w2, w3 = R4INTT_ROM[rom_idx];  rom_idx += 1
+
+            for j in range(stride):
+                m = 4 * k * stride + j
+
+                # First radix-2 layer (lines 14–17)
+                t0 = (a[m]            + a[m +   stride]) * INV2     % q
+                t1 = (a[m]            - a[m +   stride]) * OMEGA1_4 % q
+                t2 = (a[m + 2*stride] + a[m + 3*stride]) * INV2     % q
+                t3 = (a[m + 2*stride] - a[m + 3*stride])             % q
+
+                # Second radix-2 layer (lines 18–21)
+                a[m]            = (t0 + t2) * INV2 % q
+                a[m +   stride] = (t1 + t3) * w1   % q
+                a[m + 2*stride] = (t0 - t2) * w2   % q
+                a[m + 3*stride] = (t1 - t3) * w3   % q
+
+        intt_stage_traces.append({
+            "stage":  f"r4_pass_{pass_num}",
+            "pass":   pass_num,
+            "length": stride,
+            "coeffs": list(a)
+        })
+
+    return a
 
 # FIPS203 Algorithm 12
 def BaseCaseMultiply(a0: int, a1: int, b0: int, b1: int, gamma: int) -> (int,int):
