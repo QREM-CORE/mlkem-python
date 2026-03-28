@@ -86,6 +86,45 @@ def organize_intt_rom_passes(stage_traces):
     return rom_output
 
 # =============================================================================
+# === Separate Output Writers
+# =============================================================================
+
+def save_comp_decomp(output_data):
+    """
+    Collects all Compress_d and Decompress_d call traces per test and writes
+    them to results/comp_decomp_results.json.
+    """
+    comp_decomp_output = {
+        "vsId":       output_data.get("vsId"),
+        "algorithm":  output_data.get("algorithm"),
+        "testGroups": []
+    }
+
+    for group in output_data.get("testGroups", []):
+        new_group = {
+            "tgId":         group.get("tgId"),
+            "parameterSet": group.get("parameterSet"),
+            "tests":        []
+        }
+
+        for test in group.get("tests", []):
+            new_group["tests"].append({
+                "tcId":             test.get("tcId"),
+                "ek":               test.get("ek"),
+                "m":                test.get("m"),
+                "compress_calls":   test.get("compress_traces",   []),
+                "decompress_calls": test.get("decompress_traces", [])
+            })
+
+        comp_decomp_output["testGroups"].append(new_group)
+
+    os.makedirs("results", exist_ok=True)
+    filename = "results/comp_decomp_results.json"
+    with open(filename, "w") as f:
+        f.write(compact_json_dumps(comp_decomp_output))
+    print(f"Compress/Decompress results saved to {filename}")
+
+# =============================================================================
 # === Main
 # =============================================================================
 
@@ -110,8 +149,8 @@ def verify_encaps_with_intt(prompt_path, expected_path):
         "testGroups": []
     }
 
-    print(f"{'tcId':<6} | {'K status':<10} | {'c status':<10} | {'INTT calls':<10}")
-    print("-" * 50)
+    print(f"{'tcId':<6} | {'K status':<10} | {'c status':<10} | {'INTT calls':<10} | {'compress':<10} | {'decompress':<10}")
+    print("-" * 75)
 
     for group in data.get("testGroups", []):
         if group.get("parameterSet") != "ML-KEM-768":
@@ -132,10 +171,12 @@ def verify_encaps_with_intt(prompt_path, expected_path):
             ek_bytes = bytes.fromhex(test.get("ek"))
             m_bytes  = bytes.fromhex(test.get("m"))
 
-            # Clear traces before each Encaps call
+            # Clear ALL traces before each Encaps call
             auxiliaries.intt_stage_traces.clear()
+            auxiliaries.compress_traces.clear()
+            auxiliaries.decompress_traces.clear()
 
-            # Run Encapsulation — NTT_inv fires inside here
+            # Run Encapsulation — NTT_inv, Compress, Decompress fire inside here
             K, c = INTERNAL_MLKEM_Encaps(ek_bytes, m_bytes, MLKEM768)
 
             actual_k = K.hex().upper()
@@ -150,10 +191,12 @@ def verify_encaps_with_intt(prompt_path, expected_path):
                 if actual_c != expected_lookup[tcid].get("c", "").upper():
                     c_status = "FAIL"
 
-            # Capture INTT intermediates
-            intt_rom_passes = organize_intt_rom_passes(list(auxiliaries.intt_stage_traces))
+            # Capture intermediates
+            intt_rom_passes  = organize_intt_rom_passes(list(auxiliaries.intt_stage_traces))
+            compress_calls   = list(auxiliaries.compress_traces)
+            decompress_calls = list(auxiliaries.decompress_traces)
 
-            print(f"{tcid:<6} | {k_status:<10} | {c_status:<10} | {len(intt_rom_passes):<10}")
+            print(f"{tcid:<6} | {k_status:<10} | {c_status:<10} | {len(intt_rom_passes):<10} | {len(compress_calls):<10} | {len(decompress_calls):<10}")
 
             new_group["tests"].append({
                 "tcId":            tcid,
@@ -163,16 +206,22 @@ def verify_encaps_with_intt(prompt_path, expected_path):
                 "k":               actual_k,
                 "k_status":        k_status,
                 "c_status":        c_status,
-                "intt_rom_passes": intt_rom_passes
+                "intt_rom_passes": intt_rom_passes,
+                "compress_traces": compress_calls,
+                "decompress_traces": decompress_calls,
             })
 
         results["testGroups"].append(new_group)
 
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
+
+    # --- Primary output ---
     with open(OUTPUT_FILE, 'w') as f:
         f.write(compact_json_dumps(results))
+    print(f"\nMain results saved to        {OUTPUT_FILE}")
 
-    print(f"\nResults with INTT intermediates saved to {OUTPUT_FILE}")
+    # --- Separate focused output ---
+    save_comp_decomp(results)
 
 # =============================================================================
 # === Entry Point

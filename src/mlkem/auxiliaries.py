@@ -19,6 +19,9 @@ butterfly_traces = []   # every full butterfly (PE) operation  → pe0.sv / pe3.
 ntt_stage_traces = []   # 256 coefficients snapshotted after each NTT stage
 cbd_traces     = []   # every SamplePolyCBD_eta call    
 intt_stage_traces = []   # 256 coefficients snapshotted after each INTT stage   
+multiply_ntt_traces = []   # every MultiplyNTTs call        → pointwise_mul.sv
+compress_traces     = []   # every Compress_d call           → compress.sv
+decompress_traces   = []   # every Decompress_d call         → decompress.sv
 
 def clear_all_traces():
     """Helper — call this before each test to ensure isolation."""
@@ -29,6 +32,9 @@ def clear_all_traces():
     ntt_stage_traces.clear()
     cbd_traces.clear()  
     intt_stage_traces.clear()
+    multiply_ntt_traces.clear()
+    compress_traces.clear()
+    decompress_traces.clear()
 
 # =============================================================================
 # === Instrumented Arithmetic Primitives
@@ -104,17 +110,46 @@ def BytesToBits(B: bytes) -> list[int]:
             byte >>= 1
     return b
 
+# def Compress_d(x: list[int], d: int) -> list[int]:
+#     assert 1 <= d < 12
+#     def compress_coefficient(x2,d):
+#         return int(((1<<d) * x2 + q//2) // q) % (1<<d)
+#     return [compress_coefficient(i, d) for i in x]
+
 def Compress_d(x: list[int], d: int) -> list[int]:
     assert 1 <= d < 12
-    def compress_coefficient(x2,d):
-        return int(((1<<d) * x2 + q//2) // q) % (1<<d)
-    return [compress_coefficient(i, d) for i in x]
+    def compress_coefficient(x2, d):
+        return int(((1 << d) * x2 + q // 2) // q) % (1 << d)
+    result = [compress_coefficient(i, d) for i in x]
 
+    compress_traces.append({
+        "call_index": len(compress_traces),
+        "d":          d,
+        "input":      list(x),
+        "output":     list(result)
+    })
+
+    return result
+
+# def Decompress_d(y: list[int], d: int) -> list[int]:
+#     assert 1 <= d < 12
+#     def decompress_coefficient(y2,d):
+#         return int((q * y2 + (1<<d)//2) // (1<<d)) % q
+#     return [decompress_coefficient(i,d) for i in y]
 def Decompress_d(y: list[int], d: int) -> list[int]:
     assert 1 <= d < 12
-    def decompress_coefficient(y2,d):
-        return int((q * y2 + (1<<d)//2) // (1<<d)) % q
-    return [decompress_coefficient(i,d) for i in y]
+    def decompress_coefficient(y2, d):
+        return int((q * y2 + (1 << d) // 2) // (1 << d)) % q
+    result = [decompress_coefficient(i, d) for i in y]
+
+    decompress_traces.append({
+        "call_index": len(decompress_traces),
+        "d":          d,
+        "input":      list(y),
+        "output":     list(result)
+    })
+
+    return result
 
 # FIPS203 Algorithm 5
 def ByteEncode_d(F: list[int], d: int) -> bytes:
@@ -501,7 +536,19 @@ def BaseCaseMultiply(a0: int, a1: int, b0: int, b1: int, gamma: int) -> (int,int
     c1 = (a0 * b1 + a1 * b0) % q
     return c0, c1
 
-# FIPS203 Algorithm 11
+# # FIPS203 Algorithm 11
+# def MultiplyNTTs(f_hat: list[int], g_hat: list[int]) -> list[int]:
+#     assert len(f_hat) == 256 and len(g_hat) == 256
+#     h_hat = [0] * 256
+#     for i in range(128):
+#         h_hat[2*i], h_hat[2*i + 1] = BaseCaseMultiply(
+#             f_hat[2*i],
+#             f_hat[2*i + 1],
+#             g_hat[2*i],
+#             g_hat[2*i + 1],
+#             _2BitRev7_1(i)
+#         )
+#     return h_hat
 def MultiplyNTTs(f_hat: list[int], g_hat: list[int]) -> list[int]:
     assert len(f_hat) == 256 and len(g_hat) == 256
     h_hat = [0] * 256
@@ -513,4 +560,13 @@ def MultiplyNTTs(f_hat: list[int], g_hat: list[int]) -> list[int]:
             g_hat[2*i + 1],
             _2BitRev7_1(i)
         )
+
+    call_index = len(multiply_ntt_traces)
+    multiply_ntt_traces.append({
+        "call_index": call_index,
+        "f_hat":      list(f_hat),
+        "g_hat":      list(g_hat),
+        "h_hat":      list(h_hat)
+    })
+
     return h_hat
