@@ -17,9 +17,9 @@ class MLKEM768:
     dv = 4
 
 # Paths - Update these to match your actual file names
-PROMPT_FILE = 'tests/ML-KEM-encapDecap-FIPS203/prompt.json'
-EXPECTED_FILE = 'tests/ML-KEM-encapDecap-FIPS203/expectedResults.json'
-OUTPUT_FILE = 'tests/results/mlkem_768_encap_results.json'
+PROMPT_FILE = 'vectors/ML-KEM-encapDecap-FIPS203/prompt.json'
+EXPECTED_FILE = 'vectors/ML-KEM-encapDecap-FIPS203/expectedResults.json'
+OUTPUT_FILE = 'results/mlkem_768_encap_results.json'
 
 def verify_mlkem_encap_range(prompt_path, expected_path):
     with open(prompt_path, 'r') as f:

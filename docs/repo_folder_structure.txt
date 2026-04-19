@@ -1,49 +1,35 @@
-mlkem-python/
+mlkem-python-implementation/
+├── LICENSE
+├── README.md
+├── requirements.txt
 │
-├── pyproject.toml                ← build system + dependencies (modern standard)
-├── setup.cfg                     ← optional: metadata/config if using setuptools
-├── requirements.txt              ← dev dependencies (pytest, numpy, etc.)
-├── README.md                     ← project overview
-├── LICENSE                       ← license (MIT, BSD, etc.)
-├── .gitignore
+├── docs/
+│   └── NIST.FIPS.203.pdf
 │
-├── src/                          ← all actual code lives here
-│   └── mlkem/                    ← your main package (import as `mlkem`)
-│       ├── __init__.py
-│       ├── params.py
-│       ├── mod.py
-│       ├── poly.py
-│       ├── ntt.py
-│       ├── sample.py
-│       ├── hash.py
-│       ├── utils.py
-│       ├── k_pke.py
-│       ├── kem.py
-│       └── constants/
-│           ├── zetas_kyber.py
-│           └── test_vectors.json
-│
-├── tests/                        ← unit + integration tests
+├── src/mlkem/                        ← core library (unchanged functionality)
 │   ├── __init__.py
-│   ├── test_mod.py
-│   ├── test_poly.py
-│   ├── test_ntt.py
-│   ├── test_sample.py
-│   ├── test_k_pke.py
-│   ├── test_kem.py
-│   └── test_integration.py
+│   ├── auxiliaries.py                
+│   ├── kpke.py                       
+│   ├── mlkem.py  
+│   └── trace_auxiliaries.py                      
 │
-├── examples/                     ← usage scripts or demos
-│   ├── run_demo.py
-│   ├── verify_vectors.py
-│   └── performance_test.py
+├── vectors/                          ← read-only NIST reference data (move out of tests/)
+│   ├── ML-KEM-KeyGen-FIPS203/
+│   └── ML-KEM-encapDecap-FIPS203/
 │
-├── docs/                         ← optional project documentation
-│   ├── index.md
-│   ├── design_overview.md
-│   └── fips203_mapping.md
+├── scripts/                          ← RTL vector generators (tools, not tests)
+│   ├── gen_keygen_vectors.py         ← Intermediate_Generator_KeyGen.py
+│   ├── gen_ntt_radix4_vectors.py     ← Intermediate_KeyGen_Radix4_2.py
+│   ├── gen_encrypt_vectors.py        ← Intermediate_Encrypt_4_2.py
+│   └── gen_byte_encode_decode.py     ← Intermediate_generate_ByteEncode_ByteDecode.py
 │
-└── notebooks/                    ← optional Jupyter notebooks for exploration
-    ├── NTT_Visualization.ipynb
-    ├── Keygen_Walkthrough.ipynb
-    └── Encaps_vs_Decaps.ipynb
+├── tests/                            ← NIST compliance validation only
+│   ├── test_keygen.py                ← Key-Gen-Test.py
+│   ├── test_encap.py                 ← Encrypt-Test.py
+│   ├── test_decap.py                 ← Decrypt-Test.py
+│   └── compare_results.py           ← test_gem.py
+│
+└── results/                          ← generated JSON (top-level, gitignored or kept)
+    ├── comp_decomp_results.json
+    ├── output_ntt_radix_4_2.json
+    └── ...

@@ -1,0 +1,26 @@
+{
+  "vsId": 42,
+  "algorithm": "ML-KEM",
+  "testGroups": [
+    {
+      "tgId": 2,
+      "parameterSet": "ML-KEM-768",
+      "tests": []
+    },
+    {
+      "tgId": 5,
+      "parameterSet": "ML-KEM-768",
+      "tests": []
+    },
+    {
+      "tgId": 9,
+      "parameterSet": "ML-KEM-768",
+      "tests": []
+    },
+    {
+      "tgId": 10,
+      "parameterSet": "ML-KEM-768",
+      "tests": []
+    }
+  ]
+}

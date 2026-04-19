@@ -14,7 +14,7 @@ class MLKEM768:
 
 
 # Load your provided JSON file
-with open('tests/ML-KEM-KeyGen-FIPS203/prompt (1).json', 'r') as f:
+with open('vectors/ML-KEM-KeyGen-FIPS203/prompt (1).json', 'r') as f:
     input_data = json.load(f)
 
 def verify_mlkem_vectors(data):
@@ -51,7 +51,7 @@ def verify_mlkem_vectors(data):
             })
     
     # Write the results to a file so they are actually generated
-    with open('tests/results/mlkem_768_results.json', 'w') as f:
+    with open('results/mlkem_768_results.json', 'w') as f:
         import json
         json.dump(results, f, indent=4)
     

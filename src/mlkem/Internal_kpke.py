@@ -1,4 +1,4 @@
-from .auxiliaries import (
+from .trace_auxiliaries import (
     SampleNTT,
     PRF_eta,
     SamplePolyCBD_eta,

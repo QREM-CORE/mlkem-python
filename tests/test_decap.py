@@ -17,8 +17,8 @@ class MLKEM768:
     dv = 4
 
 # Use the same file for input and expected values
-INTERNAL_FILE = 'tests/ML-KEM-encapDecap-FIPS203/internalProjection.json'
-OUTPUT_FILE = 'tests/results/mlkem_768_decap_results.json'
+INTERNAL_FILE = 'vectors/ML-KEM-encapDecap-FIPS203/internalProjection.json'
+OUTPUT_FILE = 'results/mlkem_768_decap_results.json'
 
 def verify_mlkem_decap_internal(file_path):
     if not os.path.exists(file_path):

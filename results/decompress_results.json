@@ -1,0 +1,22 @@
+{
+  "vsId": 42,
+  "algorithm": "ML-KEM",
+  "testGroups": [
+    {
+      "tgId": 2,
+      "tests": []
+    },
+    {
+      "tgId": 5,
+      "tests": []
+    },
+    {
+      "tgId": 9,
+      "tests": []
+    },
+    {
+      "tgId": 10,
+      "tests": []
+    }
+  ]
+}

@@ -46,4 +46,4 @@ def compare_results(my_results_path, expected_results_path):
                 print(f"{tcid:<6} | {ek_status:<10} | {dk_status:<10} | {note}")
 
 # Run the comparison
-compare_results('tests/results/mlkem_768_results.json', 'tests/ML-KEM-KeyGen-FIPS203/expectedResults.json')
+compare_results('results/mlkem_768_results.json', 'vectors/ML-KEM-KeyGen-FIPS203/expectedResults.json')

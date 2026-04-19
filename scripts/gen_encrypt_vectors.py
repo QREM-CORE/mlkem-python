@@ -6,7 +6,7 @@ import re
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
 from mlkem.internal_mlkem import INTERNAL_MLKEM_Encaps
-from mlkem import auxiliaries
+from mlkem import trace_auxiliaries as auxiliaries
 
 class MLKEM768:
     k    = 3
@@ -17,8 +17,8 @@ class MLKEM768:
     du   = 10
     dv   = 4
 
-PROMPT_FILE   = 'ML-KEM-encapDecap-FIPS203/prompt.json'
-EXPECTED_FILE = 'ML-KEM-encapDecap-FIPS203/expectedResults.json'
+PROMPT_FILE   = 'vectors/ML-KEM-encapDecap-FIPS203/prompt.json'
+EXPECTED_FILE = 'vectors/ML-KEM-encapDecap-FIPS203/expectedResults.json'
 OUTPUT_FILE   = 'results/output_intt_radix_4_2.json'
 
 # =============================================================================
@@ -124,6 +124,41 @@ def save_comp_decomp(output_data):
         f.write(compact_json_dumps(comp_decomp_output))
     print(f"Compress/Decompress results saved to {filename}")
 
+def save_byte_encode_decode(output_data):
+    """
+    Collects all ByteEncode_d and ByteDecode_d call traces per test and writes
+    them to results/byte_encode_decode_results.json.
+    """
+    encode_decode_output = {
+        "vsId":       output_data.get("vsId"),
+        "algorithm":  output_data.get("algorithm"),
+        "testGroups": []
+    }
+
+    for group in output_data.get("testGroups", []):
+        new_group = {
+            "tgId":         group.get("tgId"),
+            "parameterSet": group.get("parameterSet"),
+            "tests":        []
+        }
+
+        for test in group.get("tests", []):
+            new_group["tests"].append({
+                "tcId":             test.get("tcId"),
+                "ek":               test.get("ek"),
+                "m":                test.get("m"),
+                "encode_calls":     test.get("encode_traces",   []),
+                "decode_calls":     test.get("decode_traces", [])
+            })
+
+        encode_decode_output["testGroups"].append(new_group)
+
+    os.makedirs("results", exist_ok=True)
+    filename = "results/byte_encode_decode_results.json"
+    with open(filename, "w") as f:
+        f.write(compact_json_dumps(encode_decode_output))
+    print(f"Byte Encode/Decode results saved to {filename}")
+
 # =============================================================================
 # === Main
 # =============================================================================
@@ -175,6 +210,8 @@ def verify_encaps_with_intt(prompt_path, expected_path):
             auxiliaries.intt_stage_traces.clear()
             auxiliaries.compress_traces.clear()
             auxiliaries.decompress_traces.clear()
+            auxiliaries.byte_encode_traces.clear()
+            auxiliaries.byte_decode_traces.clear()
 
             # Run Encapsulation — NTT_inv, Compress, Decompress fire inside here
             K, c = INTERNAL_MLKEM_Encaps(ek_bytes, m_bytes, MLKEM768)
@@ -195,6 +232,8 @@ def verify_encaps_with_intt(prompt_path, expected_path):
             intt_rom_passes  = organize_intt_rom_passes(list(auxiliaries.intt_stage_traces))
             compress_calls   = list(auxiliaries.compress_traces)
             decompress_calls = list(auxiliaries.decompress_traces)
+            encode_calls     = list(auxiliaries.byte_encode_traces)
+            decode_calls     = list(auxiliaries.byte_decode_traces)
 
             print(f"{tcid:<6} | {k_status:<10} | {c_status:<10} | {len(intt_rom_passes):<10} | {len(compress_calls):<10} | {len(decompress_calls):<10}")
 
@@ -209,6 +248,8 @@ def verify_encaps_with_intt(prompt_path, expected_path):
                 "intt_rom_passes": intt_rom_passes,
                 "compress_traces": compress_calls,
                 "decompress_traces": decompress_calls,
+                "encode_traces":   encode_calls,
+                "decode_traces":   decode_calls,
             })
 
         results["testGroups"].append(new_group)
@@ -222,6 +263,7 @@ def verify_encaps_with_intt(prompt_path, expected_path):
 
     # --- Separate focused output ---
     save_comp_decomp(results)
+    save_byte_encode_decode(results)
 
 # =============================================================================
 # === Entry Point

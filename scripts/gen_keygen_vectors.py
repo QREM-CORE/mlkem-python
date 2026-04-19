@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 from mlkem.internal_mlkem import INTERNAL_MLKEM_KeyGen
 from mlkem import Internal_kpke
-from mlkem import auxiliaries
+from mlkem import trace_auxiliaries as auxiliaries
 
 class MLKEM768:
     k    = 3
@@ -33,84 +33,60 @@ def compact_json_dumps(obj):
 
 def organize_rom_passes(stage_traces):
     """
-    Reorganizes ntt_stage_traces into ROM hardware pass structure.
+    Reorganizes the flat ntt_stage_traces list into ROM hardware pass structure.
 
-    Each Radix-4/2 NTT call produces 5 entries:
-        [0] stage="input"       raw polynomial before any butterfly
-        [1] stage="r4_pass_1"   after ROM1 Radix-4 pass 1 (stride=64)
-        [2] stage="r4_pass_2"   after ROM1 Radix-4 pass 2 (stride=16)
-        [3] stage="r4_pass_3"   after ROM1 Radix-4 pass 3 (stride=4)
-        [4] stage="r2_final"    after ROM2 final Radix-2  (stride=2)
+    Each forward NTT call produces 8 entries:
+        [0] stage="input"           raw input before any butterfly
+        [1] stage=0, length=128  ┐  ROM 1 Radix-4 pass 1
+        [2] stage=1, length=64   ┘
+        [3] stage=2, length=32   ┐  ROM 1 Radix-4 pass 2
+        [4] stage=3, length=16   ┘
+        [5] stage=4, length=8    ┐  ROM 1 Radix-4 pass 3
+        [6] stage=5, length=4    ┘
+        [7] stage=6, length=2       ROM 2 final Radix-2
     """
     rom_output = []
-    num_calls  = len(stage_traces) // 5
+    num_calls  = len(stage_traces) // 8
 
     for ntt_index in range(num_calls):
-        chunk = stage_traces[ntt_index * 5 : (ntt_index + 1) * 5]
+        chunk = stage_traces[ntt_index * 8 : (ntt_index + 1) * 8]
 
-        if len(chunk) != 5:
-            print(f"  Warning: ntt_index={ntt_index} incomplete ({len(chunk)}/5 entries). Skipping.")
+        if len(chunk) != 8:
+            print(f"  Warning: ntt_index={ntt_index} incomplete ({len(chunk)}/8 entries). Skipping.")
             continue
 
         if chunk[0].get("stage") != "input":
             print(f"  Warning: ntt_index={ntt_index} first entry is not 'input'. Skipping.")
             continue
 
+        s = [chunk[i]["coeffs"] for i in range(1, 8)]
+
         rom_output.append({
             "ntt_index": ntt_index,
             "direction": "forward",
             "input":     chunk[0]["coeffs"],
             "ROM1_R4NTT": {
-                "pass_1": chunk[1]["coeffs"],
-                "pass_2": chunk[2]["coeffs"],
-                "pass_3": chunk[3]["coeffs"]
+                "pass_1": {
+                    "after_stage_0_length128": s[0],
+                    "after_stage_1_length64":  s[1]
+                },
+                "pass_2": {
+                    "after_stage_2_length32":  s[2],
+                    "after_stage_3_length16":  s[3]
+                },
+                "pass_3": {
+                    "after_stage_4_length8":   s[4],
+                    "after_stage_5_length4":   s[5]
+                }
             },
             "ROM2_OMEGA": {
-                "final_radix2": chunk[4]["coeffs"]
+                "final_radix2": {
+                    "after_stage_6_length2": s[6]
+                }
             }
         })
 
     return rom_output
-
-# =============================================================================
-# === Separate Output Writers
-# =============================================================================
-
-def save_multiply_ntt(output_data):
-    """
-    Collects all MultiplyNTTs call traces per test and writes them to
-    results/multiply_ntt_results.json.
-    """
-    multiply_ntt_output = {
-        "vsId":       output_data.get("vsId"),
-        "algorithm":  output_data.get("algorithm"),
-        "revision":   output_data.get("revision"),
-        "testGroups": []
-    }
-
-    for group in output_data.get("testGroups", []):
-        new_group = {
-            "tgId":         group.get("tgId"),
-            "parameterSet": group.get("parameterSet"),
-            "tests":        []
-        }
-
-        for test in group.get("tests", []):
-            new_group["tests"].append({
-                "tcId":               test.get("tcId"),
-                "d":                  test.get("d"),
-                "z":                  test.get("z"),
-                "multiply_ntt_calls": test.get("multiply_ntt_traces", [])
-            })
-
-        multiply_ntt_output["testGroups"].append(new_group)
-
-    os.makedirs("results", exist_ok=True)
-    filename = "results/multiply_ntt_results.json"
-    with open(filename, "w") as f:
-        f.write(compact_json_dumps(multiply_ntt_output))
-    print(f"MultiplyNTT results saved to    {filename}")
-
 
 # =============================================================================
 # === Main
@@ -136,13 +112,10 @@ def verify_and_capture(data):
 
         for test in group.get("tests", []):
 
-            # Clear ALL traces before each test for full isolation
+            # Clear all traces before each test
             Internal_kpke.ntt_traces = []
             auxiliaries.ntt_stage_traces.clear()
             auxiliaries.cbd_traces.clear()
-            auxiliaries.multiply_ntt_traces.clear()
-            auxiliaries.compress_traces.clear()
-            auxiliaries.decompress_traces.clear()
 
             d_bytes = bytes.fromhex(test.get("d"))
             z_bytes = bytes.fromhex(test.get("z"))
@@ -164,39 +137,30 @@ def verify_and_capture(data):
             rom_passes = organize_rom_passes(list(auxiliaries.ntt_stage_traces))
 
             test_entry = {
-                "tcId":                test.get("tcId"),
-                "d":                   test.get("d"),
-                "z":                   test.get("z"),
-                "ek":                  ek_bytes.hex().upper(),
-                "dk":                  dk_bytes.hex().upper(),
-                "S_and_E_vectors":     s_and_e,
-                "ntt_intermediates":   list(Internal_kpke.ntt_traces),
-                "rom_passes":          rom_passes,
-                "multiply_ntt_traces": list(auxiliaries.multiply_ntt_traces),
-            
+                "tcId":              test.get("tcId"),
+                "d":                 test.get("d"),
+                "z":                 test.get("z"),
+                "ek":                ek_bytes.hex().upper(),
+                "dk":                dk_bytes.hex().upper(),
+                "S_and_E_vectors":   s_and_e,
+                "ntt_intermediates": list(Internal_kpke.ntt_traces),
+                "rom_passes":        rom_passes
             }
             new_group["tests"].append(test_entry)
 
             print(f"  tcId={test.get('tcId')} "
                   f"| rom_entries={len(rom_passes)} "
                   f"| S_polys={len(s_and_e['S'])} "
-                  f"| E_polys={len(s_and_e['E'])} "
-                  f"| multiply_ntt_calls={len(auxiliaries.multiply_ntt_traces)} "
-                  )
+                  f"| E_polys={len(s_and_e['E'])}")
 
         output_data["testGroups"].append(new_group)
 
     os.makedirs("results", exist_ok=True)
 
-    # --- Primary output ---
-    output_filename = "results/output_ntt_radix_4_2.json"
+    output_filename = "results/output_ntt_radix2_results.json"
     with open(output_filename, "w") as f:
         f.write(compact_json_dumps(output_data))
-    print(f"\nMain results saved to        {output_filename}")
-
-    # --- Separate focused outputs ---
-    save_multiply_ntt(output_data)
-   
+    print(f"\nResults saved to {output_filename}")
 
 
 # =============================================================================
