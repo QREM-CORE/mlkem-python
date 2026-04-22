@@ -1,4 +1,4 @@
-from .auxiliaries import (
+from .trace_auxiliaries import (
     SampleNTT,
     PRF_eta,
     SamplePolyCBD_eta,
@@ -12,7 +12,7 @@ from .auxiliaries import (
     G,
     q,
 )
-
+ntt_traces = []
 # FIPS203 Algorithm 13
 def KPKE_KeyGen(d: bytes, k: int, eta1: int) -> (bytes,bytes):
     # Encode k into the minimal number of bytes (at least 1) to avoid
@@ -49,8 +49,10 @@ def KPKE_KeyGen(d: bytes, k: int, eta1: int) -> (bytes,bytes):
         Nctr += 1
 
     s_hat = [NTT(poly) for poly in s]
-
+    ntt_traces.append({"label": "s_hat", "value": list(s_hat)})
     e_hat = [NTT(poly) for poly in e]
+    ntt_traces.append({"label": "e_hat", "value": list(e_hat)})
+    
 
 
     t_hat = []
