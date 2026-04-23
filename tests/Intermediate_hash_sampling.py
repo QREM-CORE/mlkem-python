@@ -2,12 +2,12 @@ import json
 import os
 import sys
 import secrets
-from Crypto.Hash import SHAKE256
+from Crypto.Hash import SHA3_512, SHAKE256
 
 # Add src directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
-from mlkem.auxiliaries import SampleNTT, SamplePolyCBD_eta, PRF_eta
+from mlkem.auxiliaries import SampleNTT, SamplePolyCBD_eta, PRF_eta, G
 
 def format_beats(coeffs):
     """
@@ -25,74 +25,141 @@ def format_beats(coeffs):
 
 def generate_test_vectors():
     results = {
-        "version": "1.0",
+        "version": "1.1",
         "description": "ML-KEM Intermediate Hash Sampling Test Vectors",
         "tests": []
     }
 
-    # --- Test A: NTT Sampler Vectors ---
-    # Input Seed: 34 Bytes (rho + i + j)
-    seed_a = secrets.token_bytes(34)
+    # --- Test A: NTT Sampler (Standard) ---
+    rho = secrets.token_bytes(32)
+    col, row = 1, 0  # symmetric-ish but standard
+    seed_a = rho + bytes([col, row])
     coeffs_a = SampleNTT(seed_a)
     beats_a = format_beats(coeffs_a)
 
     results["tests"].append({
         "test_id": "Test A",
-        "name": "NTT Sampler Vectors (Variable Rate)",
-        "input_seed_hex": seed_a.hex().upper(),
-        "input_description": "34 Bytes (rho + i + j)",
+        "name": "NTT Sampler (Standard)",
+        "input_seed_hex": rho.hex().upper(),
+        "config": {
+            "hsu_mode_i": "MODE_SAMPLE_NTT",
+            "ROW": row,
+            "COL": col
+        },
         "output_beats": beats_a
     })
 
+    # --- Test A2: NTT Sampler (Asymmetric Coords) ---
+    # Catch byte-swap bugs in (row, col) injection
+    col2, row2 = 5, 2
+    seed_a2 = rho + bytes([col2, row2])
+    coeffs_a2 = SampleNTT(seed_a2)
+    beats_a2 = format_beats(coeffs_a2)
+
+    results["tests"].append({
+        "test_id": "Test A2",
+        "name": "NTT Sampler (Asymmetric)",
+        "input_seed_hex": rho.hex().upper(),
+        "config": {
+            "hsu_mode_i": "MODE_SAMPLE_NTT",
+            "ROW": row2,
+            "COL": col2
+        },
+        "output_beats": beats_a2
+    })
+
     # --- Test B: CBD eta=2 (ML-KEM-512) ---
-    # Input Seed: 33 Bytes (sigma + b)
     seed_b = secrets.token_bytes(33)
     sigma_b = seed_b[:32]
-    b_byte = seed_b[32:33]
-
-    # Expand via PRF
-    expanded_b = PRF_eta(2, sigma_b, b_byte)
+    n_b = seed_b[32:33]
+    expanded_b = PRF_eta(2, sigma_b, n_b)
     coeffs_b = SamplePolyCBD_eta(expanded_b, 2)
     beats_b = format_beats(coeffs_b)
 
     results["tests"].append({
         "test_id": "Test B",
-        "name": "CBD Sampler Vectors (eta=2)",
-        "input_seed_hex": seed_b.hex().upper(),
-        "config": {"hsu_mode_i": "MODE_SAMPLE_CBD", "is_eta3_i": 0},
+        "name": "CBD Sampler (eta=2)",
+        "input_seed_hex": sigma_b.hex().upper(),
+        "config": {
+            "hsu_mode_i": "MODE_SAMPLE_CBD",
+            "is_eta3_i": 0,
+            "CBD_N": n_b[0]
+        },
         "output_beats": beats_b
     })
 
     # --- Test C: CBD eta=3 (ML-KEM-768/1024) ---
-    # Input Seed: 33 Bytes (sigma + b)
     seed_c = secrets.token_bytes(33)
     sigma_c = seed_c[:32]
-    c_byte = seed_c[32:33]
-
-    # Expand via PRF
-    expanded_c = PRF_eta(3, sigma_c, c_byte)
+    n_c = seed_c[32:33]
+    expanded_c = PRF_eta(3, sigma_c, n_c)
     coeffs_c = SamplePolyCBD_eta(expanded_c, 3)
     beats_c = format_beats(coeffs_c)
 
     results["tests"].append({
         "test_id": "Test C",
-        "name": "CBD Sampler Vectors (eta=3)",
-        "input_seed_hex": seed_c.hex().upper(),
-        "config": {"hsu_mode_i": "MODE_SAMPLE_CBD", "is_eta3_i": 1},
+        "name": "CBD Sampler (eta=3)",
+        "input_seed_hex": sigma_c.hex().upper(),
+        "config": {
+            "hsu_mode_i": "MODE_SAMPLE_CBD",
+            "is_eta3_i": 1,
+            "CBD_N": n_c[0]
+        },
         "output_beats": beats_c
     })
 
-    # --- Test E: Wrapper Smoke Test (SHAKE256 Bypass) ---
-    # Input Seed: 32 Bytes
+    # --- Test D: SHA3-512 Bypass (Regression) ---
+    d_input = secrets.token_bytes(32)
+    sha512_full = SHA3_512.new(d_input).digest()
+    sha512_beats = [sha512_full[i:i+8][::-1].hex().upper() for i in range(0, 64, 8)]
+    # Reversed bytes for LE AXI interface
+    sha512_beats_le = []
+    for i in range(0, 64, 8):
+        chunk = sha512_full[i:i+8]
+        sha512_beats_le.append(chunk[::-1].hex().upper())
+
+    results["tests"].append({
+        "test_id": "Test D",
+        "name": "SHA3-512 Bypass (Baseline)",
+        "input_seed_hex": d_input.hex().upper(),
+        "config": {"hsu_mode_i": "MODE_HASH_SHA3_512"},
+        "output_beats": sha512_beats_le
+    })
+
+    # --- Test G: CBD from Sigma ---
+    # This matches the internal HSU flow: G(d) -> sigma -> PRF(sigma, n)
+    d_input_g = secrets.token_bytes(32)
+    rho_g, sigma_g = G(d_input_g)
+    n_g = bytes([0x07])
+    expanded_g = PRF_eta(2, sigma_g, n_g)
+    coeffs_g = SamplePolyCBD_eta(expanded_g, 2)
+    beats_g = format_beats(coeffs_g)
+
+    results["tests"].append({
+        "test_id": "Test G",
+        "name": "CBD from Sigma (Flow)",
+        "input_seed_hex": d_input_g.hex().upper(),
+        "sigma_expected": sigma_g.hex().upper(),
+        "config": {
+            "hsu_mode_i": "MODE_SAMPLE_CBD",
+            "is_eta3_i": 0,
+            "CBD_N": 0x07,
+            "RUN_G_FIRST": 1 # Flag for TB to run SHA3-512 first
+        },
+        "output_beats": beats_g
+    })
+
+    # --- Test E: SHAKE256 Bypass ---
     seed_e = secrets.token_bytes(32)
     hash_e = SHAKE256.new(seed_e).read(32)
+    hash_beats_le = [hash_e[i:i+8][::-1].hex().upper() for i in range(0, 32, 8)]
 
     results["tests"].append({
         "test_id": "Test E",
-        "name": "Demux/Mux Bypass (SHAKE256)",
+        "name": "SHAKE256 Bypass",
         "input_seed_hex": seed_e.hex().upper(),
         "config": {"hsu_mode_i": "MODE_HASH_SHAKE256"},
-        "output_hash_hex": hash_e.hex().upper()
+        "output_beats": hash_beats_le
     })
 
     # Save results
