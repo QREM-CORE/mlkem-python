@@ -122,6 +122,7 @@ def generate_test_vectors():
         "test_id": "Test D",
         "name": "SHA3-512 Bypass (Baseline)",
         "input_seed_hex": d_input.hex().upper(),
+        "sigma_expected": sha512_full[32:64].hex().upper(),
         "config": {"hsu_mode_i": "MODE_HASH_SHA3_512"},
         "output_beats": sha512_beats_le
     })
