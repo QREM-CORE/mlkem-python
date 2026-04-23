@@ -162,11 +162,36 @@ def generate_test_vectors():
         "output_beats": hash_beats_le
     })
 
-    # Save results
-    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'results'))
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, 'output_hsu_sampling.json')
+    # --- Test F: Poly Absorb SHA3-256 (1 poly, deterministic) ---
+    # Coefficients 0..255 sequential, 4-per-beat. SHA3-256 of packed bytes.
+    # Deterministic: no randomness, hardcoded output preserved from original manual entry.
+    poly_coeffs_f = list(range(256))  # coefficients 0..255
+    coeff_beats_f = []
+    for i in range(0, 256, 4):
+        coeff_beats_f.append([poly_coeffs_f[i], poly_coeffs_f[i+1],
+                               poly_coeffs_f[i+2], poly_coeffs_f[i+3]])
 
+    results["tests"].append({
+        "test_id": "Test F",
+        "name": "Poly Absorb SHA3-256 (1 poly)",
+        "config": {
+            "hsu_mode_i": "MODE_ABSORB_POLY",
+            "poly_cnt": 1
+        },
+        "input_coeffs": coeff_beats_f,
+        "output_beats": [
+            "945159B9A42EED58",
+            "D1C344226B308E18",
+            "CEAAF1542CB860E1",
+            "C61622E593A5CBC2"
+        ]
+    })
+
+    # Save results directly to verif/test_vectors.json
+    # Script lives at verif/mlkem-python/tests/ — go up 2 levels to verif/
+    output_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..', '..', 'test_vectors.json')
+    )
     with open(output_path, 'w') as f:
         json.dump(results, f, indent=2)
 
