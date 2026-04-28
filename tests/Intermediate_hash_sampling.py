@@ -2,7 +2,7 @@ import json
 import os
 import sys
 import secrets
-from Crypto.Hash import SHA3_512, SHAKE256
+from Crypto.Hash import SHA3_512, SHAKE256, SHA3_256
 
 # Add src directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
@@ -186,6 +186,37 @@ def generate_test_vectors():
             "CEAAF1542CB860E1",
             "C61622E593A5CBC2"
         ]
+    })
+
+    # --- Test H: Multi-Phase Absorption (Poly + Seed) ---
+    # H(poly || seed). Uses 1 poly and 32 bytes of seed.
+    poly_coeffs_h = list(range(256))
+    seed_h = secrets.token_bytes(32)
+    
+    # Pack poly: 12-bit LE, 4 coeffs per 64-bit beat (48 bits used)
+    packed_poly = bytearray()
+    coeff_beats_h = []
+    for i in range(0, 256, 4):
+        c = [poly_coeffs_h[i+j] & 0xFFF for j in range(4)]
+        coeff_beats_h.append(c)
+        val = c[0] | (c[1] << 12) | (c[2] << 24) | (c[3] << 36)
+        packed_poly.extend(val.to_bytes(6, 'little'))
+    
+    # Combined message
+    msg_h = packed_poly + seed_h
+    hash_h = SHA3_256.new(msg_h).digest()
+    hash_beats_h = [hash_h[i:i+8][::-1].hex().upper() for i in range(0, 32, 8)]
+
+    results["tests"].append({
+        "test_id": "Test H",
+        "name": "Multi Phase Absorption (Poly + Seed)",
+        "config": {
+            "hsu_mode_i": "MODE_ABSORB_POLY",
+            "poly_cnt": 1
+        },
+        "input_coeffs": coeff_beats_h,
+        "input_seed_hex": seed_h.hex().upper(),
+        "output_beats": hash_beats_h
     })
 
     # Save results directly to verif/test_vectors.json
