@@ -76,10 +76,12 @@ def generate_test_vectors():
     coeffs_b = SamplePolyCBD_eta(expanded_b, 2)
     beats_b = format_beats(coeffs_b)
 
+    sigma_b_le = b''.join(sigma_b[i:i+8][::-1] for i in range(24, -1, -8))
     results["tests"].append({
         "test_id": "Test B",
         "name": "CBD Sampler (eta=2)",
         "input_seed_hex": seed_g_b.hex().upper(),
+        "sigma_expected": sigma_b_le.hex().upper(),
         "config": {
             "hsu_mode_i": "MODE_SAMPLE_CBD",
             "is_eta3_i": 0,
@@ -98,10 +100,12 @@ def generate_test_vectors():
     coeffs_c = SamplePolyCBD_eta(expanded_c, 3)
     beats_c = format_beats(coeffs_c)
 
+    sigma_c_le = b''.join(sigma_c[i:i+8][::-1] for i in range(24, -1, -8))
     results["tests"].append({
         "test_id": "Test C",
         "name": "CBD Sampler (eta=3)",
         "input_seed_hex": seed_g_c.hex().upper(),
+        "sigma_expected": sigma_c_le.hex().upper(),
         "config": {
             "hsu_mode_i": "MODE_SAMPLE_CBD",
             "is_eta3_i": 1,
@@ -139,11 +143,12 @@ def generate_test_vectors():
     coeffs_g = SamplePolyCBD_eta(expanded_g, 2)
     beats_g = format_beats(coeffs_g)
 
+    sigma_g_le = b''.join(sigma_g[i:i+8][::-1] for i in range(24, -1, -8))
     results["tests"].append({
         "test_id": "Test G",
         "name": "CBD from Sigma (Flow)",
         "input_seed_hex": d_input_g.hex().upper(),
-        "sigma_expected": sigma_g.hex().upper(),
+        "sigma_expected": sigma_g_le.hex().upper(),
         "config": {
             "hsu_mode_i": "MODE_SAMPLE_CBD",
             "is_eta3_i": 0,
