@@ -167,7 +167,7 @@ def generate_test_vectors():
         "test_id": "Test E",
         "name": "SHAKE256 Bypass",
         "input_seed_hex": seed_e.hex().upper(),
-        "config": {"hsu_mode_i": "MODE_HASH_SHAKE256"},
+        "config": {"hsu_mode_i": "MODE_HASH_SHAKE256", "XOF_LEN": 32},
         "output_beats": hash_beats_le
     })
 
@@ -178,7 +178,8 @@ def generate_test_vectors():
         "input_seed_hex": seed_e.hex().upper(),
         "config": {
             "hsu_mode_i": "MODE_HASH_SHAKE256",
-            "INPUT_SEL": 2
+            "INPUT_SEL": 2,
+            "XOF_LEN": 32
         },
         "output_beats": hash_beats_le
     })
