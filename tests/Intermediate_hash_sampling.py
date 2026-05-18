@@ -17,9 +17,8 @@ def format_beats(coeffs):
     """
     beats = []
     for i in range(0, 256, 4):
-        # We assume coefficients are in range [0, 3328], so 16-bit padding is sufficient.
-        # Concatenate 4 coefficients into a 64-bit integer
-        beat = (coeffs[i+3] << 48) | (coeffs[i+2] << 32) | (coeffs[i+1] << 16) | coeffs[i]
+        # Hardware packs four 12-bit coefficients into the lower 48 bits: {16'h0000, c3, c2, c1, c0}
+        beat = ((coeffs[i+3] & 0xFFF) << 36) | ((coeffs[i+2] & 0xFFF) << 24) | ((coeffs[i+1] & 0xFFF) << 12) | (coeffs[i] & 0xFFF)
         beats.append(f"{beat:016X}")
     return beats
 
@@ -69,41 +68,49 @@ def generate_test_vectors():
     })
 
     # --- Test B: CBD eta=2 (ML-KEM-512) ---
-    seed_b = secrets.token_bytes(33)
-    sigma_b = seed_b[:32]
-    n_b = seed_b[32:33]
+    seed_g_b = secrets.token_bytes(32)
+    hash_g_b = SHA3_512.new(seed_g_b).digest()
+    sigma_b = hash_g_b[32:64]
+    n_b = secrets.token_bytes(1)
     expanded_b = PRF_eta(2, sigma_b, n_b)
     coeffs_b = SamplePolyCBD_eta(expanded_b, 2)
     beats_b = format_beats(coeffs_b)
 
+    sigma_b_le = b''.join(sigma_b[i:i+8][::-1] for i in range(24, -1, -8))
     results["tests"].append({
         "test_id": "Test B",
         "name": "CBD Sampler (eta=2)",
-        "input_seed_hex": sigma_b.hex().upper(),
+        "input_seed_hex": seed_g_b.hex().upper(),
+        "sigma_expected": sigma_b_le.hex().upper(),
         "config": {
             "hsu_mode_i": "MODE_SAMPLE_CBD",
             "is_eta3_i": 0,
-            "CBD_N": n_b[0]
+            "CBD_N": n_b[0],
+            "RUN_G_FIRST": 1
         },
         "output_beats": beats_b
     })
 
     # --- Test C: CBD eta=3 (ML-KEM-768/1024) ---
-    seed_c = secrets.token_bytes(33)
-    sigma_c = seed_c[:32]
-    n_c = seed_c[32:33]
+    seed_g_c = secrets.token_bytes(32)
+    hash_g_c = SHA3_512.new(seed_g_c).digest()
+    sigma_c = hash_g_c[32:64]
+    n_c = secrets.token_bytes(1)
     expanded_c = PRF_eta(3, sigma_c, n_c)
     coeffs_c = SamplePolyCBD_eta(expanded_c, 3)
     beats_c = format_beats(coeffs_c)
 
+    sigma_c_le = b''.join(sigma_c[i:i+8][::-1] for i in range(24, -1, -8))
     results["tests"].append({
         "test_id": "Test C",
         "name": "CBD Sampler (eta=3)",
-        "input_seed_hex": sigma_c.hex().upper(),
+        "input_seed_hex": seed_g_c.hex().upper(),
+        "sigma_expected": sigma_c_le.hex().upper(),
         "config": {
             "hsu_mode_i": "MODE_SAMPLE_CBD",
             "is_eta3_i": 1,
-            "CBD_N": n_c[0]
+            "CBD_N": n_c[0],
+            "RUN_G_FIRST": 1
         },
         "output_beats": beats_c
     })
@@ -136,11 +143,12 @@ def generate_test_vectors():
     coeffs_g = SamplePolyCBD_eta(expanded_g, 2)
     beats_g = format_beats(coeffs_g)
 
+    sigma_g_le = b''.join(sigma_g[i:i+8][::-1] for i in range(24, -1, -8))
     results["tests"].append({
         "test_id": "Test G",
         "name": "CBD from Sigma (Flow)",
         "input_seed_hex": d_input_g.hex().upper(),
-        "sigma_expected": sigma_g.hex().upper(),
+        "sigma_expected": sigma_g_le.hex().upper(),
         "config": {
             "hsu_mode_i": "MODE_SAMPLE_CBD",
             "is_eta3_i": 0,
@@ -159,7 +167,20 @@ def generate_test_vectors():
         "test_id": "Test E",
         "name": "SHAKE256 Bypass",
         "input_seed_hex": seed_e.hex().upper(),
-        "config": {"hsu_mode_i": "MODE_HASH_SHAKE256"},
+        "config": {"hsu_mode_i": "MODE_HASH_SHAKE256", "XOF_LEN": 32},
+        "output_beats": hash_beats_le
+    })
+
+    # --- Test I: SHAKE256 Bypass (Raw AXI) ---
+    results["tests"].append({
+        "test_id": "Test I",
+        "name": "SHAKE256 Bypass (Raw AXI)",
+        "input_seed_hex": seed_e.hex().upper(),
+        "config": {
+            "hsu_mode_i": "MODE_HASH_SHAKE256",
+            "INPUT_SEL": 2,
+            "XOF_LEN": 32
+        },
         "output_beats": hash_beats_le
     })
 
